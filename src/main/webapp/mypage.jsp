@@ -13,6 +13,13 @@
     <link rel="stylesheet" type="text/css" href="${pageContext.request.contextPath}/css/styles.css">
 </head>
 <body>
+
+<div style="text-align: right;">
+    <form action="${pageContext.request.contextPath}/logout" method="get" style="display:inline;">
+        <button type="submit">Выйти</button>
+    </form>
+</div>
+
 <h1>Обзор директории</h1>
 <p>Время онлайн: <%= request.getAttribute("currentTime") %></p>
 <p>Выбранный путь: <%= request.getAttribute("currentPath") %></p>
