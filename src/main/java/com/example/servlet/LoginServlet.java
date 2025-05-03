@@ -1,5 +1,6 @@
 package com.example.servlet;
 
+import com.example.util.DatabaseUtil;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -8,12 +9,16 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import org.mindrot.jbcrypt.BCrypt;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 
 @WebServlet("/login")
 public class LoginServlet extends HttpServlet {
     private static final String BASE_DIR = "C:\\Users\\serdy\\IdeaProjects\\filemanager";
-    private static final String USERS_FILE = BASE_DIR + File.separator + "users.txt";
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -25,39 +30,40 @@ public class LoginServlet extends HttpServlet {
         String login = req.getParameter("login");
         String password = req.getParameter("password");
 
-        boolean authenticated = false;
+        if (login == null || password == null || login.isEmpty() || password.isEmpty()) {
+            resp.sendRedirect(req.getContextPath() + "/login?error=1");
+            return;
+        }
 
-        if (login != null && password != null && !login.isEmpty() && !password.isEmpty()) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(USERS_FILE))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String[] parts = line.split(";");
-                    if (parts.length >= 2 && parts[0].equals(login)) {
-                        String storedHash = parts[1];
-                        if (org.mindrot.jbcrypt.BCrypt.checkpw(password, storedHash)) {
-                            authenticated = true;
-                            break;
+        try (Connection conn = DatabaseUtil.getConnection()) {
+            String sql = "SELECT password_hash FROM users WHERE login = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, login);
+                ResultSet rs = stmt.executeQuery();
+
+                if (rs.next()) {
+                    String storedHash = rs.getString("password_hash");
+                    if (BCrypt.checkpw(password, storedHash)) {
+                        HttpSession session = req.getSession(true);
+                        session.setAttribute("user", login);
+
+                        // Создание домашней директории
+                        File userDir = new File(BASE_DIR, login);
+                        if (!userDir.exists()) {
+                            userDir.mkdirs();
                         }
+
+                        session.setAttribute("home", userDir.getAbsolutePath());
+                        resp.sendRedirect(req.getContextPath() + "/catalog");
+                        return;
                     }
                 }
             }
+        } catch (SQLException e) {
+            throw new ServletException("Ошибка при попытке входа", e);
         }
 
-        if (authenticated) {
-            HttpSession session = req.getSession(true);
-            session.setAttribute("user", login);
-
-            // Создание домашней папки
-            File userDir = new File(BASE_DIR, login);
-            if (!userDir.exists()) {
-                userDir.mkdirs();
-            }
-
-            session.setAttribute("home", userDir.getAbsolutePath());
-            resp.sendRedirect(req.getContextPath() + "/catalog");
-        } else {
-            resp.sendRedirect(req.getContextPath() + "/login?error=1");
-        }
+        // Если не прошла проверка
+        resp.sendRedirect(req.getContextPath() + "/login?error=1");
     }
 }
-

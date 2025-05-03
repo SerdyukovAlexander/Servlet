@@ -1,5 +1,6 @@
 package com.example.servlet;
 
+import com.example.util.DatabaseUtil;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -7,12 +8,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.mindrot.jbcrypt.BCrypt;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.sql.*;
 
 @WebServlet("/register")
 public class RegisterServlet extends HttpServlet {
     private static final String BASE_DIR = "C:\\Users\\serdy\\IdeaProjects\\filemanager";
-    private static final String USERS_FILE = BASE_DIR + File.separator + "users.txt";
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -31,51 +33,41 @@ public class RegisterServlet extends HttpServlet {
             return;
         }
 
-        File userFile = new File(USERS_FILE);
-        if (!userFile.exists()) {
-            userFile.getParentFile().mkdirs();
-            userFile.createNewFile();
-        }
+        try (Connection conn = DatabaseUtil.getConnection()) {
 
-        // Проверка, есть ли такой логин
-        try (BufferedReader reader = new BufferedReader(new FileReader(userFile))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(";");
-                if (parts.length > 0 && parts[0].equals(login)) {
+            // Проверка: существует ли пользователь с таким логином
+            try (PreparedStatement checkStmt = conn.prepareStatement("SELECT id FROM users WHERE login = ?")) {
+                checkStmt.setString(1, login);
+                ResultSet rs = checkStmt.executeQuery();
+                if (rs.next()) {
                     resp.sendRedirect(req.getContextPath() + "/register?error=login_exists");
                     return;
                 }
             }
-        }
 
-        // Хешируем пароль перед сохранением
-        String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
+            // Хешируем пароль
+            String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
 
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(userFile, true))) {
-            writer.write(login + ";" + hashedPassword + ";" + email);
-            writer.newLine();
-        }
-
-        // Создаём домашнюю директорию
-        File userDir = new File(BASE_DIR, login);
-        if (!userFile.exists()) {
-            File parentDir = userFile.getParentFile();
-            if (!parentDir.exists()) {
-                boolean dirCreated = parentDir.mkdirs();
-                if (!dirCreated) {
-                    throw new IOException("Не удалось создать директорию: " + parentDir.getAbsolutePath());
-                }
+            // Сохраняем пользователя в БД
+            try (PreparedStatement insertStmt = conn.prepareStatement(
+                    "INSERT INTO users (login, password_hash, email) VALUES (?, ?, ?)")) {
+                insertStmt.setString(1, login);
+                insertStmt.setString(2, hashedPassword);
+                insertStmt.setString(3, email);
+                insertStmt.executeUpdate();
             }
 
-            boolean fileCreated = userFile.createNewFile();
-            if (!fileCreated) {
-                throw new IOException("Не удалось создать файл: " + userFile.getAbsolutePath());
+            // Создание домашней директории
+            File userDir = new File(BASE_DIR, login);
+            if (!userDir.exists()) {
+                userDir.mkdirs();
             }
+
+            // Редирект на логин
+            resp.sendRedirect(req.getContextPath() + "/login?registered=1");
+
+        } catch (SQLException e) {
+            throw new ServletException("Ошибка при регистрации пользователя", e);
         }
-
-
-        // Редирект на логин с сообщением
-        resp.sendRedirect(req.getContextPath() + "/login?registered=1");
     }
 }
