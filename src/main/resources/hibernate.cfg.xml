@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hibernate-configuration>
+
+    <session-factory>
+        <!-- URL подключения к базе данных -->
+        <property name="hibernate.connection.url">jdbc:mysql://localhost:3306/filemanager</property>
+        <property name="hibernate.connection.username">root</property>
+        <property name="hibernate.connection.password">Sasha_307_1</property>
+        <!-- Драйвер для подключения к базе данных -->
+        <property name="hibernate.connection.driver_class">com.mysql.cj.jdbc.Driver</property>
+        <!-- Диалект для работы с MySQL -->
+        <property name="hibernate.dialect">org.hibernate.dialect.MySQL8Dialect</property>
+
+        <property name="jakarta.persistence.schema-generation.database.action">update</property>
+
+        <property name="hibernate.show_sql">true</property>
+        <property name="hibernate.format_sql">true</property>
+
+        <property name="hibernate.c3p0.min_size">5</property>
+        <property name="hibernate.c3p0.max_size">20</property>
+        <property name="hibernate.c3p0.timeout">300</property>
+
+        <mapping class="com.example.model.User"/>
+    </session-factory>
+
+</hibernate-configuration>

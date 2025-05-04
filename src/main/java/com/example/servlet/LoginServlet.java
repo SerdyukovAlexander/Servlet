@@ -1,6 +1,8 @@
 package com.example.servlet;
 
-import com.example.util.DatabaseUtil;
+import com.example.dao.UserDao;
+import com.example.model.User;
+import com.example.util.HibernateUtil;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -11,14 +13,16 @@ import org.mindrot.jbcrypt.BCrypt;
 
 import java.io.File;
 import java.io.IOException;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 
 @WebServlet("/login")
 public class LoginServlet extends HttpServlet {
-    private static final String BASE_DIR = "C:\\Users\\serdy\\IdeaProjects\\filemanager";
+
+    private UserDao userDao;
+
+    @Override
+    public void init() {
+        userDao = new UserDao(HibernateUtil.getSessionFactory());
+    }
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -30,40 +34,49 @@ public class LoginServlet extends HttpServlet {
         String login = req.getParameter("login");
         String password = req.getParameter("password");
 
-        if (login == null || password == null || login.isEmpty() || password.isEmpty()) {
-            resp.sendRedirect(req.getContextPath() + "/login?error=1");
+        if (isEmpty(login) || isEmpty(password)) {
+            log("Пустой логин или пароль");
+            resp.sendRedirect(req.getContextPath() + "/login?error=empty_fields");
             return;
         }
 
-        try (Connection conn = DatabaseUtil.getConnection()) {
-            String sql = "SELECT password_hash FROM users WHERE login = ?";
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                stmt.setString(1, login);
-                ResultSet rs = stmt.executeQuery();
+        User user = userDao.getUserByLogin(login);
 
-                if (rs.next()) {
-                    String storedHash = rs.getString("password_hash");
-                    if (BCrypt.checkpw(password, storedHash)) {
-                        HttpSession session = req.getSession(true);
-                        session.setAttribute("user", login);
-
-                        // Создание домашней директории
-                        File userDir = new File(BASE_DIR, login);
-                        if (!userDir.exists()) {
-                            userDir.mkdirs();
-                        }
-
-                        session.setAttribute("home", userDir.getAbsolutePath());
-                        resp.sendRedirect(req.getContextPath() + "/catalog");
-                        return;
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            throw new ServletException("Ошибка при попытке входа", e);
+        if (user == null) {
+            log("Пользователь не найден: " + login);
+            resp.sendRedirect(req.getContextPath() + "/login?error=user_not_found");
+            return;
         }
 
-        // Если не прошла проверка
-        resp.sendRedirect(req.getContextPath() + "/login?error=1");
+        String storedHash = user.getPasswordHash();
+
+        if (isEmpty(storedHash)) {
+            log("У пользователя отсутствует хэш пароля: " + login);
+            resp.sendRedirect(req.getContextPath() + "/login?error=internal");
+            return;
+        }
+
+        try {
+            if (BCrypt.checkpw(password, storedHash)) {
+                HttpSession session = req.getSession(true);
+                session.setAttribute("user", user.getLogin());
+
+                // Устанавливаем путь к домашней директории
+                String homeDir = "C:\\Users\\serdy\\IdeaProjects\\filemanager" + File.separator + user.getLogin();
+                session.setAttribute("home", homeDir);
+
+                resp.sendRedirect(req.getContextPath() + "/catalog");
+            } else {
+                log("Неверный пароль: " + login);
+                resp.sendRedirect(req.getContextPath() + "/login?error=invalid_credentials");
+            }
+        } catch (Exception e) {
+            log("Ошибка проверки пароля для пользователя " + login + ": " + e.getMessage(), e);
+            resp.sendRedirect(req.getContextPath() + "/login?error=internal");
+        }
+    }
+
+    private boolean isEmpty(String str) {
+        return str == null || str.trim().isEmpty();
     }
 }

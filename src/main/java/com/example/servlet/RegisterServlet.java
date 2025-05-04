@@ -1,6 +1,8 @@
 package com.example.servlet;
 
-import com.example.util.DatabaseUtil;
+import com.example.dao.UserDao;
+import com.example.model.User;
+import com.example.util.HibernateUtil;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
@@ -10,11 +12,16 @@ import org.mindrot.jbcrypt.BCrypt;
 
 import java.io.File;
 import java.io.IOException;
-import java.sql.*;
 
 @WebServlet("/register")
 public class RegisterServlet extends HttpServlet {
-    private static final String BASE_DIR = "C:\\Users\\serdy\\IdeaProjects\\filemanager";
+
+    private UserDao userDao;
+
+    @Override
+    public void init() {
+        userDao = new UserDao(HibernateUtil.getSessionFactory());
+    }
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -24,50 +31,52 @@ public class RegisterServlet extends HttpServlet {
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         String login = req.getParameter("login");
-        String password = req.getParameter("password");
         String email = req.getParameter("email");
+        String password = req.getParameter("password");
 
-        if (login == null || password == null || email == null ||
-                login.isEmpty() || password.isEmpty() || email.isEmpty()) {
-            resp.sendRedirect(req.getContextPath() + "/register?error=1");
+        if (isEmpty(login) || isEmpty(email) || isEmpty(password)) {
+            log("Пустые поля при регистрации");
+            resp.sendRedirect(req.getContextPath() + "/register?error=empty_fields");
             return;
         }
 
-        try (Connection conn = DatabaseUtil.getConnection()) {
-
-            // Проверка: существует ли пользователь с таким логином
-            try (PreparedStatement checkStmt = conn.prepareStatement("SELECT id FROM users WHERE login = ?")) {
-                checkStmt.setString(1, login);
-                ResultSet rs = checkStmt.executeQuery();
-                if (rs.next()) {
-                    resp.sendRedirect(req.getContextPath() + "/register?error=login_exists");
-                    return;
-                }
-            }
-
-            // Хешируем пароль
-            String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
-
-            // Сохраняем пользователя в БД
-            try (PreparedStatement insertStmt = conn.prepareStatement(
-                    "INSERT INTO users (login, password_hash, email) VALUES (?, ?, ?)")) {
-                insertStmt.setString(1, login);
-                insertStmt.setString(2, hashedPassword);
-                insertStmt.setString(3, email);
-                insertStmt.executeUpdate();
-            }
-
-            // Создание домашней директории
-            File userDir = new File(BASE_DIR, login);
-            if (!userDir.exists()) {
-                userDir.mkdirs();
-            }
-
-            // Редирект на логин
-            resp.sendRedirect(req.getContextPath() + "/login?registered=1");
-
-        } catch (SQLException e) {
-            throw new ServletException("Ошибка при регистрации пользователя", e);
+        if (userDao.getUserByLogin(login) != null) {
+            log("Пользователь уже существует: " + login);
+            resp.sendRedirect(req.getContextPath() + "/register?error=user_exists");
+            return;
         }
+
+        String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
+        User user = new User();
+        user.setLogin(login);
+        user.setEmail(email);
+        user.setPasswordHash(hashedPassword);
+
+        try {
+            userDao.saveUser(user);
+        } catch (Exception e) {
+            log("Ошибка при сохранении пользователя: " + e.getMessage(), e);
+            resp.sendRedirect(req.getContextPath() + "/register?error=save_failed");
+            return;
+        }
+
+        // Создаём директорию пользователя
+        String baseDir = "C:\\Users\\serdy\\IdeaProjects\\filemanager";
+        File userDir = new File(baseDir, login);
+        if (!userDir.exists()) {
+            boolean created = userDir.mkdirs();
+            if (!created) {
+                log("Не удалось создать директорию пользователя: " + userDir.getAbsolutePath());
+                resp.sendRedirect(req.getContextPath() + "/register?error=home_dir_creation_failed");
+                return;
+            }
+        }
+
+        // Перенаправляем на логин
+        resp.sendRedirect(req.getContextPath() + "/login");
+    }
+
+    private boolean isEmpty(String str) {
+        return str == null || str.trim().isEmpty();
     }
 }
